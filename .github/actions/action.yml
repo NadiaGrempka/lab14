@@ -1,0 +1,57 @@
+# .github/actions/custom-deploy/action.yml
+name: "Custom Deploy Action"
+description: "Własna akcja kompozytowa do wdrożenia aplikacji"
+author: "Zespół DevOps"
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Ustaw zmienne wejściowe
+      run: |
+        echo "Środowisko: ${{ inputs.environment }}"
+        echo "Wersja: ${{ inputs.version }}"
+        echo "Notify-team: ${{ inputs.notify-team }}"
+
+    - name: Wykonaj skrypt wdrożenia
+      shell: bash
+      run: |
+        # zakładamy, że deploy.sh jest w katalogu action
+        chmod +x "${{ github.action_path }}/deploy.sh"
+        "${{ github.action_path }}/deploy.sh" "${{ inputs.environment }}" "${{ inputs.version }}" "${{ inputs.notify-team }}"
+
+    - name: Powiadom GitHub o statusie wdrożenia
+      if: ${{ inputs.notify-team == 'true' }}
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: ''
+      script: |
+          const url = "${{ steps.execute.outputs.deployment-url }}";
+          const time = "${{ steps.execute.outputs.deployment-time }}";
+          github.issues.createComment({
+            issue_number: context.issue.number || 0,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `:rocket: Aplikacja została wdrożona w środowisku **${{ inputs.environment }}**!\n> URL: ${url}\n> Czas: ${time}`
+          });
+
+inputs:
+  environment:
+    description: 'Środowisko docelowe (np. staging/prod)'
+    required: true
+    default: 'staging'
+  version:
+    description: 'Wersja aplikacji do wdrożenia (np. 1.2.3)'
+    required: true
+  notify-team:
+    description: 'Czy powiadomić zespół (true/false)'
+    required: false
+    default: 'false'
+
+outputs:
+  deployment-url:
+    description: 'URL, pod którym jest dostępna aplikacja'
+  deployment-time:
+    description: 'Czas zakończenia wdrożenia (UTC, ISO8601)'

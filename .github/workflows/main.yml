@@ -1,0 +1,400 @@
+# .github/workflows/main.yml
+
+name: "CI/CD Pipeline dla Node.js"
+
+# ----------------------------------------
+# 1. WYZWALACZE
+# ----------------------------------------
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Środowisko docelowe (staging/prod)'
+        required: true
+        default: 'staging'
+
+# ----------------------------------------
+# 2. GLOBALNE ZMIENNE (opcjonalne)
+# ----------------------------------------
+env:
+  NODE_ENV: development
+  CACHE_VERSION: 'v1'
+  # Przykładowy webhook Slacka (dla akcji notify-slack)
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  # Ustawienie domyślnej wersji Node (można nadpisać w matrix)
+  DEFAULT_NODE_VERSION: 18
+
+# ----------------------------------------
+# 3. JOBS
+# ----------------------------------------
+jobs:
+
+  # -------------------------------------------------
+  # JOB: lint – analiza statyczna, ESLint / Sonar / itp.
+  # -------------------------------------------------
+  lint:
+    name: "Lint & Static Analysis"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Ustaw Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.DEFAULT_NODE_VERSION }}
+
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: lint-${{ runner.os }}-node-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            lint-${{ runner.os }}-node-
+
+      - name: Instalacja zależności
+        run: npm ci
+
+      - name: Uruchom ESLint
+        run: npm run lint
+
+      - name: Uruchom SonarQube Scanner (opcjonalnie)
+        if: ${{ secrets.SONAR_TOKEN != '' }}
+        uses: sonarsource/sonarcloud-github-action@v1
+        with:
+          projectKey: my-org_my-repo
+          organization: my-org
+          token: ${{ secrets.SONAR_TOKEN }}
+
+
+  # -------------------------------------------------
+  # JOB: security-audit – audyt bezpieczeństwa dependencies
+  # -------------------------------------------------
+  security-audit:
+    name: "Security Audit Dependencies"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Ustaw Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: audit-${{ runner.os }}-node-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            audit-${{ runner.os }}-node-
+
+      - name: Instalacja zależności
+        run: npm ci
+
+      - name: Uruchom `npm audit`
+        run: npm audit --audit-level=moderate
+
+      - name: Uruchom Snyk (opcjonalnie)
+        if: ${{ secrets.SNYK_TOKEN != '' }}
+        uses: snyk/actions@master
+        with:
+          command: test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+
+  # -------------------------------------------------
+  # JOB: format-check – sprawdzanie formatowania (Prettier)
+  # -------------------------------------------------
+  format-check:
+    name: "Formatowanie (Prettier)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Ustaw Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: format-${{ runner.os }}-node-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            format-${{ runner.os }}-node-
+
+      - name: Instalacja zależności
+        run: npm ci
+
+      - name: Sprawdź formatowanie (Prettier)
+        run: npm run format:check
+        # Zakładamy, że w package.json mamy skrypt: "format:check": "prettier --check \"src/**/*.js\""
+
+
+  # -------------------------------------------------
+  # JOB: unit-tests – testy jednostkowe w kontenerze z cache’owaniem dependencies
+  # -------------------------------------------------
+  unit-tests:
+    name: "Unit Tests w Kontenerze"
+    needs:
+      - lint
+      - security-audit
+      - format-check
+    # Używamy macierzy wersji Node i Python
+    strategy:
+      matrix:
+        node-version: [14, 16, 18]
+        python-version: [3.8, 3.9]
+    runs-on: ubuntu-latest
+    container:
+      image: node:${{ matrix.node-version }}
+      options: >-
+        --cpus 2
+        --memory 4g
+      # Można podmontować dodatkowe wolumeny, np. cache npm:
+      # volumes:
+      #   - ${{ runner.temp }}/npm-cache:/root/.npm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Ustaw Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache node_modules (wewnątrz kontenera)
+        uses: actions/cache@v3
+        with:
+          path: /usr/src/app/node_modules
+          key: unit-tests-${{ matrix.node-version }}-deps
+          restore-keys: |
+            unit-tests-${{ matrix.node-version }}-deps
+
+      - name: Instalacja dependencies
+        run: |
+          npm ci
+          pip install -r requirements.txt || true
+        # Zakładamy, że jest plik requirements.txt, nawet jeśli jest pusty
+
+      - name: Uruchom testy jednostkowe Node.js
+        run: npm test
+        env:
+          CI: true
+
+      - name: Uruchom przykładowe testy Python (jeśli istnieją)
+        if: ${{ matrix.python-version }}
+        run: |
+          python3 -m pytest tests/unit || echo "Brak testów Python"
+
+      - name: Generowanie raportu coverage i upload do Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/*.xml
+          flags: unittests-node${{ matrix.node-version }}-py${{ matrix.python-version }}
+          name: codecov-${{ matrix.node-version }}-py${{ matrix.python-version }}
+
+      - name: Archiwizuj raporty testów jako artefakt
+        uses: actions/upload-artifact@v3
+        with:
+          name: unit-test-reports-${{ matrix.node-version }}-py${{ matrix.python-version }}
+          path: |
+            coverage/
+            tests/unit/junit.xml
+
+
+  # -------------------------------------------------
+  # JOB: integration-tests – testy integracyjne z docker-compose
+  # -------------------------------------------------
+  integration-tests:
+    name: "Integration Tests z Docker Compose"
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Ustaw Docker Compose
+        run: |
+          docker-compose -v || true
+          # (Ubuntu-latest już ma docker i docker-compose; jeśli nie, trzeba je zainstalować)
+
+      - name: Uruchom usługi pomocnicze
+        run: |
+          docker-compose up -d
+          # Poczekaj aż usługi będą online (np. sprawdź porty)
+          timeout 30 bash -c "until nc -z localhost 5432; do sleep 1; done"
+          timeout 30 bash -c "until nc -z localhost 6379; do sleep 1; done"
+
+      - name: Ustaw Node.js (do testów)
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Instalacja dependencies
+        run: npm ci
+
+      - name: Uruchom testy integracyjne
+        run: npm run test:integration
+        env:
+          DATABASE_URL: "postgres://postgres:secret@localhost:5432/myappdb"
+          REDIS_URL: "redis://localhost:6379"
+          CI: true
+
+      - name: Zatrzymaj usługi pomocnicze
+        if: always()
+        run: docker-compose down
+
+      - name: Generowanie raportu coverage integracyjnego i upload do Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage-integration/*.xml
+          flags: integration-tests
+
+      - name: Archiwizuj raporty integracyjne
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-reports
+          path: |
+            coverage-integration/
+            tests/integration/junit.xml
+
+
+  # -------------------------------------------------
+  # JOB: build – budowanie obrazu aplikacji (tylko po pomyślnych testach)
+  # -------------------------------------------------
+  build:
+    name: "Build Docker Image"
+    needs:
+      - integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Ustaw Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache warstw Dockera (opcjonalnie)
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-${{ github.sha }}
+          restore-keys: |
+            buildx-
+
+      - name: Buduj obraz Dockera
+        run: |
+          docker build \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            -t myapp:${{ github.sha }} \
+            .
+          # Zamień obraz w cache
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Opublikuj artefakt obrazu (wersja dok)
+        run: |
+          echo "Zbudowano obraz: myapp:${{ github.sha }}"
+          # Tu można wypchnąć na Docker Hub lub ECR, jeżeli to potrzebne
+
+
+  # -------------------------------------------------
+  # JOB: deploy – warunkowe wdrożenie (self-hosted runner)
+  # -------------------------------------------------
+  deploy:
+    name: "Deployment do środowiska"
+    needs:
+      - build
+    runs-on: self-hosted
+    if: ${{ always() }}  # job zawsze się odpali, ale warunki w krokach sprawdzą wynik poprzednich
+    steps:
+      - name: Sprawdź, czy build się powiódł
+        id: check_build
+        run: |
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "Build nie powiódł się – pomijam wdrożenie."
+            echo "deploy_skipped=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_skipped=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wykonaj wdrożenie (tylko jeśli build=success i branch=main)
+        if: ${{ steps.check_build.outputs.deploy_skipped == 'false' && github.ref == 'refs/heads/main' }}
+        uses: ./.github/actions/custom-deploy
+        id: custom_deploy
+        with:
+          environment: ${{ github.event.inputs.environment || 'staging' }}
+          version: ${{ github.sha }}
+          notify-team: 'true'
+
+      - name: Informacja o pominiętym wdrożeniu
+        if: ${{ steps.check_build.outputs.deploy_skipped == 'true' || github.ref != 'refs/heads/main' }}
+        run: |
+          echo "Wdrożenie pominięte (musiały być błędy w build lub nie jest to branch 'main')."
+
+
+  # -------------------------------------------------
+  # JOB: notify – powiadomienie o statusie całego pipeline
+  # -------------------------------------------------
+  notify:
+    name: "Powiadomienie o statusie CI/CD"
+    needs:
+      - lint
+      - security-audit
+      - format-check
+      - unit-tests
+      - integration-tests
+      - build
+      - deploy
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Sprawdź ogólny status
+        id: overall_status
+        run: |
+          STATUS="success"
+          for JOB in lint security-audit format-check unit-tests integration-tests build deploy; do
+            RESULT="${{ needs[$JOB].result }}"
+            if [ "$RESULT" != "success" ]; then
+              STATUS="failure"
+            fi
+          done
+          echo "pipeline_status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Wyślij powiadomienie na Slack (jeśli skonfigurowano)
+        if: ${{ env.SLACK_WEBHOOK_URL && steps.overall_status.outputs.pipeline_status == 'success' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ steps.overall_status.outputs.pipeline_status }}
+          fields: repo,message,commit,author,action,event,ref,workflow,job,took
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+
+      - name: Komentarz do PR/GitHub Issue (gdy brak Slacka)
+        if: ${{ !env.SLACK_WEBHOOK_URL && steps.overall_status.outputs.pipeline_status == 'failure' && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const body = `:x: Build zakończył się niepowodzeniem.\nSprawdź logi, aby zobaczyć szczegóły.`;
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
