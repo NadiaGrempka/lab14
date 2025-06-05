@@ -57,6 +57,21 @@ app.get('/health', async (req, res) => {
 //   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 // );
 
+
+// docker-compose exec postgres psql -U postgres -d myappdb
+//
+// psql (13.21 (Debian 13.21-1.pgdg120+1))
+// Type "help" for help.
+//
+//                     myappdb=# CREATE TABLE IF NOT EXISTS items (
+//     id SERIAL PRIMARY KEY,
+//     name TEXT NOT NULL,
+//     description TEXT,
+//     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+// );
+// \q
+
+
 (async () => {
     try {
         await pgPool.query(`
