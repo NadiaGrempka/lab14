@@ -18,7 +18,9 @@ services:
       - "6379:6379"
 
   app:
-    image: myapp:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       - postgres
       - redis

@@ -5,7 +5,6 @@
 //   - DATABASE_URL (np. postgres://user:pass@host:port/dbname)
 //   - REDIS_URL (np. redis://host:port)
 //   - PORT (opcjonalnie, domyślnie 3000)
-
 const express = require('express');
 const { Pool } = require('pg');
 const Redis = require('ioredis');
@@ -58,7 +57,22 @@ app.get('/health', async (req, res) => {
 //   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 // );
 
-// Pobierz listę wszystkich itemów, z cache’owaniem na 30 sekund
+(async () => {
+    try {
+        await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS items (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+        console.log('Tabela "items" gotowa.');
+    } catch (err) {
+        console.error('Błąd przy tworzeniu tabeli items:', err);
+    }
+})();
+
 app.get('/items', async (req, res) => {
     try {
         const items = await cacheOrFetch('items:all', async () => {
@@ -72,7 +86,7 @@ app.get('/items', async (req, res) => {
     }
 });
 
-// Dodaj nowy item
+
 app.post('/items', async (req, res) => {
     const { name, description } = req.body;
     if (!name) {
@@ -95,7 +109,6 @@ app.post('/items', async (req, res) => {
     }
 });
 
-// Pobierz szczegóły pojedynczego itemu po ID
 app.get('/items/:id', async (req, res) => {
     const { id } = req.params;
     try {
@@ -118,7 +131,7 @@ app.get('/items/:id', async (req, res) => {
     }
 });
 
-// Zaktualizuj item po ID
+
 app.put('/items/:id', async (req, res) => {
     const { id } = req.params;
     const { name, description } = req.body;
@@ -149,7 +162,7 @@ app.put('/items/:id', async (req, res) => {
     }
 });
 
-// Usuń item po ID
+
 app.delete('/items/:id', async (req, res) => {
     const { id } = req.params;
     try {
@@ -169,7 +182,7 @@ app.delete('/items/:id', async (req, res) => {
     }
 });
 
-// Serwer nasłuchuje na porcie określonym w ENV lub domyślnie 3000
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Serwer uruchomiony na porcie ${PORT}`);
