@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node app.js",
+    "test": "jest --coverage",
+    "format:check": "prettier --check \"src/**/*.js\"",
+    "lint": "eslint \"src/**/*.js\""
   },
   "keywords": [],
   "author": "",
@@ -12,6 +15,12 @@
   "dependencies": {
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
-    "ioredis": "^5.6.1"
+    "ioredis": "^5.6.1",
+    "pg": "^8.10.0"
+  },
+  "devDependencies": {
+    "jest": "^29.4.0",
+    "prettier": "^2.8.0",
+    "eslint": "^8.34.0"
   }
 }

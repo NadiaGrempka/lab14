@@ -17,5 +17,17 @@ services:
     ports:
       - "6379:6379"
 
+  app:
+    image: myapp:latest
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgres://postgres:secret@postgres:5432/myappdb
+      REDIS_URL: redis://redis:6379
+      PORT: 3000
+    ports:
+      - "3000:3000"
+
 volumes:
   pgdata:
