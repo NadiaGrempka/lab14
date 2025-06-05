@@ -49,15 +49,6 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// Przykładowa tabela „items” w PostgreSQL:
-// CREATE TABLE IF NOT EXISTS items (
-//   id SERIAL PRIMARY KEY,
-//   name TEXT NOT NULL,
-//   description TEXT,
-//   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-// );
-
-
 // docker-compose exec postgres psql -U postgres -d myappdb
 //
 // psql (13.21 (Debian 13.21-1.pgdg120+1))
