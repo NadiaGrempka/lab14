@@ -9,7 +9,7 @@
     "format:check": "prettier --check .",
     "format:fix": "prettier --write .",
     "lint": "eslint .",
-    "test:unit": "jest --testMatch \"**/tests/unit/*.app.test.js\" --coverage --coverageDirectory coverage/unit --coverageReporters=lcov",
+    "test:unit": "jest --testMatch \"**/tests/unit/*.test.js\" --coverage --coverageDirectory coverage/unit --coverageReporters=lcov",
     "test:integration": "jest --testMatch \"**/tests/integration/**/*.integration.test.js\" --coverage --coverageDirectory coverage/integration --coverageReporters=lcov"
   },
   "keywords": [],
