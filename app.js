@@ -106,7 +106,6 @@ app.post('/items', async (req, res) => {
       RETURNING id, name, description, created_at
     `;
         const { rows } = await pgPool.query(insertText, [name, description || null]);
-        // Wyczyść cache, bo dane się zmieniły
         await redis.del('items:all');
         res.status(201).json(rows[0]);
     } catch (err) {

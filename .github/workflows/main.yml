@@ -1,399 +1,416 @@
-name: "CI/CD Pipeline dla Node.js"
+name: "CI/CD Pipeline (Node.js + PostgreSQL + Redis)"
 
-# ----------------------------------------
-# 1. WYZWALACZE
-# ----------------------------------------
 on:
   push:
     branches:
-      - main
+      - master
       - develop
   pull_request:
     types: [opened, synchronize]
+    branches:
+      - master
+      - develop
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Środowisko docelowe (staging/prod)'
+        description: "Środowisko docelowe (staging/production)"
         required: true
-        default: 'staging'
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
 
-# ----------------------------------------
-# 2. GLOBALNE ZMIENNE (opcjonalne)
-# ----------------------------------------
 env:
-  NODE_ENV: development
-  CACHE_VERSION: 'v1'
-  # Przykładowy webhook Slacka (dla akcji notify-slack)
-  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-  # Ustawienie domyślnej wersji Node (można nadpisać w matrix)
-  DEFAULT_NODE_VERSION: 18
+  NODE_VERSION: 18
+  CACHE_VERSION: "v1"
 
-# ----------------------------------------
-# 3. JOBS
-# ----------------------------------------
 jobs:
+  ################################################
+  # 1. Faza wstępna (równoległe: lint, audit, format)
+  ################################################
 
-  # -------------------------------------------------
-  # JOB: lint – analiza statyczna, ESLint / Sonar / itp.
-  # -------------------------------------------------
   lint:
-    name: "Lint & Static Analysis"
+    name: Lint (ESLint)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Ustaw Node.js
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ env.DEFAULT_NODE_VERSION }}
+          node-version: "${{ env.NODE_VERSION }}"
 
-      - name: Cache node_modules
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: lint-${{ runner.os }}-node-${{ env.CACHE_VERSION }}
-          restore-keys: |
-            lint-${{ runner.os }}-node-
-
-      - name: Instalacja zależności
+      - name: Install dependencies
         run: npm ci
 
-      - name: Uruchom ESLint
+      - name: Run ESLint
         run: npm run lint
 
-      - name: Uruchom SonarQube Scanner (opcjonalnie)
-        if: ${{ secrets.SONAR_TOKEN != '' }}
-        uses: sonarsource/sonarcloud-github-action@v1
-        with:
-          projectKey: my-org_my-repo
-          organization: my-org
-          token: ${{ secrets.SONAR_TOKEN }}
-
-
-
-  # -------------------------------------------------
-  # JOB: security-audit – audyt bezpieczeństwa dependencies
-  # -------------------------------------------------
-  security-audit:
-    name: "Security Audit Dependencies"
+  audit:
+    name: Security Audit (npm audit)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Ustaw Node.js
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: "${{ env.NODE_VERSION }}"
 
-      - name: Cache node_modules
+      - name: Cache npm
         uses: actions/cache@v3
         with:
           path: ~/.npm
-          key: audit-${{ runner.os }}-node-${{ env.CACHE_VERSION }}
+          key: ${{ runner.os }}-node-audit-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            audit-${{ runner.os }}-node-
+            ${{ runner.os }}-node-audit-
 
-      - name: Instalacja zależności
+      - name: Install dependencies
         run: npm ci
 
-      - name: Uruchom `npm audit`
+      - name: Run npm audit (poziom moderate)
         run: npm audit --audit-level=moderate
 
-      - name: Uruchom Snyk (opcjonalnie)
-        if: ${{ secrets.SNYK_TOKEN != '' }}
-        uses: snyk/actions@master
-        with:
-          command: test
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-
-  # -------------------------------------------------
-  # JOB: format-check – sprawdzanie formatowania (Prettier)
-  # -------------------------------------------------
-  format-check:
-    name: "Formatowanie (Prettier)"
+  format:
+    name: Check Formatting (Prettier)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Ustaw Node.js
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: "${{ env.NODE_VERSION }}"
 
-      - name: Cache node_modules
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Prettier formatting
+        run: npm run format
+
+  ################################################################
+  # 2. Testy jednostkowe w matrixie (różne wersje Node.js + cache)
+  ################################################################
+
+  unit_tests:
+    name: Unit Tests (Node.js matrix)
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - audit
+      - format
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: "${{ matrix.node-version }}"
+
+      - name: Cache npm
         uses: actions/cache@v3
         with:
           path: ~/.npm
-          key: format-${{ runner.os }}-node-${{ env.CACHE_VERSION }}
+          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            format-${{ runner.os }}-node-
+            ${{ runner.os }}-node-${{ matrix.node-version }}-
 
-      - name: Instalacja zależności
+      - name: Install dependencies
+        id: npm_install
+        continue-on-error: true
         run: npm ci
 
-      - name: Sprawdź formatowanie (Prettier)
-        run: npm run format:check
-        # Zakładamy, że w package.json mamy skrypt: "format:check": "prettier --check \"src/**/*.js\""
+      - name: Upload npm debug log (jeśli npm ci się nie powiódł)
+        if: steps.npm_install.outcome == 'failure'
+        run: |
+          echo "---- Lista plików w katalogu ~/.npm/_logs ----"
+          ls ~/.npm/_logs/ || true
+          echo "---- Zawartość wszystkich .log w ~/.npm/_logs ----"
+          cat ~/.npm/_logs/*.log || true
 
+      - name: Publish npm logs as artifact
+        if: steps.npm_install.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-debug-logs-${{ matrix.node-version }}
+          path: ~/.npm/_logs/*.log
 
-  # -------------------------------------------------
-  # JOB: unit-tests – testy jednostkowe w kontenerze z cache’owaniem dependencies
-  # -------------------------------------------------
-  unit-tests:
-    name: "Unit Tests w Kontenerze"
+      - name: Fail the job if npm ci failed
+        if: steps.npm_install.outcome == 'failure'
+        run: exit 1
+
+      - name: Run Node.js Unit Tests
+        if: steps.npm_install.outcome == 'success'
+        run: npm run test:unit
+
+      - name: Upload unit coverage report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage-${{ matrix.node-version }}
+          path: coverage/unit
+
+      - name: Publish coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: coverage/unit/**/*.info
+          flags: unit-${{ matrix.node-version }}
+
+  ###########################################################################
+  # 3. Testy uruchamiane we własnym kontenerze Docker (tylko unit-testy)
+  ###########################################################################
+
+  container_tests:
+    name: Tests in Docker Container (Unit only)
+    runs-on: ubuntu-latest
     needs:
       - lint
-      - security-audit
-      - format-check
-    # Używamy macierzy wersji Node i Python
-    strategy:
-      matrix:
-        node-version: [14, 16, 18]
-        python-version: [3.8, 3.9]
-    runs-on: ubuntu-latest
-    container:
-      image: node:${{ matrix.node-version }}
-      options: >-
-        --cpus 2
-        --memory 4g
-      # Można podmontować dodatkowe wolumeny, np. cache npm:
-      # volumes:
-      #   - ${{ runner.temp }}/npm-cache:/root/.npm
+      - audit
+      - format
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Ustaw Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Cache node_modules (wewnątrz kontenera)
-        uses: actions/cache@v3
-        with:
-          path: /usr/src/app/node_modules
-          key: unit-tests-${{ matrix.node-version }}-deps
-          restore-keys: |
-            unit-tests-${{ matrix.node-version }}-deps
-
-      - name: Instalacja dependencies
-        run: |
-          npm ci
-          pip install -r requirements.txt || true
-        # Zakładamy, że jest plik requirements.txt, nawet jeśli jest pusty
-
-      - name: Uruchom testy jednostkowe Node.js
-        run: npm test
-        env:
-          CI: true
-
-      - name: Uruchom przykładowe testy Python (jeśli istnieją)
-        if: ${{ matrix.python-version }}
-        run: |
-          python3 -m pytest tests/unit || echo "Brak testów Python"
-
-      - name: Generowanie raportu coverage i upload do Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/*.xml
-          flags: unittests-node${{ matrix.node-version }}-py${{ matrix.python-version }}
-          name: codecov-${{ matrix.node-version }}-py${{ matrix.python-version }}
-
-      - name: Archiwizuj raporty testów jako artefakt
-        uses: actions/upload-artifact@v3
-        with:
-          name: unit-test-reports-${{ matrix.node-version }}-py${{ matrix.python-version }}
-          path: |
-            coverage/
-            tests/unit/junit.xml
-
-
-  # -------------------------------------------------
-  # JOB: integration-tests – testy integracyjne z docker-compose
-  # -------------------------------------------------
-  integration-tests:
-    name: "Integration Tests z Docker Compose"
-    needs: unit-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Ustaw Docker Compose
-        run: |
-          docker-compose -v || true
-          # (Ubuntu-latest już ma docker i docker-compose; jeśli nie, trzeba je zainstalować)
-
-      - name: Uruchom usługi pomocnicze
-        run: |
-          docker-compose up -d
-          # Poczekaj aż usługi będą online (np. sprawdź porty)
-          timeout 30 bash -c "until nc -z localhost 5432; do sleep 1; done"
-          timeout 30 bash -c "until nc -z localhost 6379; do sleep 1; done"
-
-      - name: Ustaw Node.js (do testów)
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-
-      - name: Instalacja dependencies
-        run: npm ci
-
-      - name: Uruchom testy integracyjne
-        run: npm run test:integration
-        env:
-          DATABASE_URL: "postgres://postgres:secret@localhost:5432/myappdb"
-          REDIS_URL: "redis://localhost:6379"
-          CI: true
-
-      - name: Zatrzymaj usługi pomocnicze
-        if: always()
-        run: docker-compose down
-
-      - name: Generowanie raportu coverage integracyjnego i upload do Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage-integration/*.xml
-          flags: integration-tests
-
-      - name: Archiwizuj raporty integracyjne
-        uses: actions/upload-artifact@v3
-        with:
-          name: integration-test-reports
-          path: |
-            coverage-integration/
-            tests/integration/junit.xml
-
-
-  # -------------------------------------------------
-  # JOB: build – budowanie obrazu aplikacji (tylko po pomyślnych testach)
-  # -------------------------------------------------
-  build:
-    name: "Build Docker Image"
-    needs:
-      - integration-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Ustaw Docker
-        uses: docker/setup-buildx-action@v2
-
-      - name: Cache warstw Dockera (opcjonalnie)
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: buildx-${{ github.sha }}
-          restore-keys: |
-            buildx-
-
-      - name: Buduj obraz Dockera
+      - name: Build Docker image for tests
         run: |
           docker build \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
-            -t myapp:${{ github.sha }} \
-            .
-          # Zamień obraz w cache
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+            --tag ci-node-postgres-redis:${{ github.sha }} \
+            --file Dockerfile .
 
-      - name: Opublikuj artefakt obrazu (wersja dok)
+      - name: Create local npm cache volume directory
+        run: mkdir -p ${{ runner.temp }}/npm-cache
+
+      - name: Run unit tests inside Docker (z ograniczeniami zasobów)
         run: |
-          echo "Zbudowano obraz: myapp:${{ github.sha }}"
-          # Tu można wypchnąć na Docker Hub lub ECR, jeżeli to potrzebne
+          docker run --rm \
+            --cpus=2 --memory=4g \
+            -v ${{ github.workspace }}:/usr/src/app \
+            -v ${{ runner.temp }}/npm-cache:/root/.npm \
+            -w /usr/src/app \
+            ci-node-postgres-redis:${{ github.sha }} \
+            bash -c "npm ci && npm run test:unit"
 
+      - name: Upload Docker-based unit coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-unit-coverage
+          path: coverage/unit
 
-  # -------------------------------------------------
-  # JOB: deploy – warunkowe wdrożenie (self-hosted runner)
-  # -------------------------------------------------
+      - name: Publish container-based coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: coverage/unit/**/*.info
+          flags: container-unit
+
+  ####################################################
+  # 4. Testy integracyjne z `services:` (Postgres + Redis)
+  ####################################################
+
+  integration_tests:
+    name: Integration Tests (PostgreSQL + Redis)
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - audit
+      - format
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: myappdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:6-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: "${{ env.NODE_VERSION }}"
+
+      - name: Cache npm
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -U postgres && break
+            echo "Czekam na PostgreSQL..."
+            sleep 1
+          done
+
+      - name: Wait for Redis
+        run: |
+          for i in {1..30}; do
+            redis-cli -h localhost ping | grep PONG && break
+            echo "Czekam na Redis..."
+            sleep 1
+          done
+
+      - name: Set env for integration tests
+        run: |
+          echo "DATABASE_URL=postgres://postgres:secret@localhost:5432/myappdb" >> $GITHUB_ENV
+          echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+          echo "NODE_ENV=test" >> $GITHUB_ENV
+
+      - name: Run Integration Tests
+        run: npm run test:integration
+
+      - name: Check integration coverage directory
+        run: |
+          echo "### Zawartość folderu coverage/integration ###"
+          ls -R coverage/integration || echo "Brak katalogu coverage/integration"
+
+      - name: Upload integration coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage/integration
+          if-no-files-found: ignore
+
+      - name: Publish integration coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: coverage/integration/**/*.info
+          flags: integration
+
+  ###########################################
+  # 5. Budowanie obrazu produkcyjnego Docker #
+  ###########################################
+
+  build:
+    name: Build & Publish Docker Image
+    runs-on: ubuntu-latest
+    needs:
+      - integration_tests
+      - unit_tests
+      - container_tests
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU (dla wieloarchitekturowego builda)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx (opcjonalnie)
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          load: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/lab14:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/lab14:latest
+
+      - name: Save Docker image to tar (opcjonalnie)
+        run: docker save ${{ secrets.DOCKERHUB_USERNAME }}/lab14:${{ github.sha }} -o image.tar
+
+      - name: Upload Docker image as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-${{ github.sha }}
+          path: image.tar
+
+  ##############################################
+  # 6. Deployment (symulowany) – tylko na master  #
+  ##############################################
+
   deploy:
-    name: "Deployment do środowiska"
+    name: Deploy (symulowany)
+    runs-on: ubuntu-latest
     needs:
       - build
-    runs-on: self-hosted
-    if: ${{ always() }}  # job zawsze się odpali, ale warunki w krokach sprawdzą wynik poprzednich
+    if: ${{ github.ref == 'refs/heads/master' }}
     steps:
-      - name: Sprawdź, czy build się powiódł
-        id: check_build
-        run: |
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            echo "Build nie powiódł się – pomijam wdrożenie."
-            echo "deploy_skipped=true" >> $GITHUB_OUTPUT
-          else
-            echo "deploy_skipped=false" >> $GITHUB_OUTPUT
-          fi
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Wykonaj wdrożenie (tylko jeśli build=success i branch=main)
-        if: ${{ steps.check_build.outputs.deploy_skipped == 'false' && github.ref == 'refs/heads/main' }}
-        uses: ./.github/actions/custom-deploy
+      - name: Symulacja pobrania artefaktu obrazu
+        run: echo ">>> [Symulacja deploy] Pobieram artefakt obrazu Docker (tylko echo)."
+
+      - name: Symulacja ładowania obrazu
+        run: echo ">>> [Symulacja deploy] Ładuję obraz Docker (tylko echo)."
+
+      - name: Run Custom Deploy Action (symulacja)
         id: custom_deploy
+        uses: ./.github/actions/custom-deploy
         with:
           environment: ${{ github.event.inputs.environment || 'staging' }}
           version: ${{ github.sha }}
-          notify-team: 'true'
+          notify-team: "true"
 
-      - name: Informacja o pominiętym wdrożeniu
-        if: ${{ steps.check_build.outputs.deploy_skipped == 'true' || github.ref != 'refs/heads/main' }}
+      - name: Wyświetl symulowane informacje o wdrożeniu
         run: |
-          echo "Wdrożenie pominięte (musiały być błędy w build lub nie jest to branch 'main')."
+          echo ">>> [Symulacja deploy] Deployment URL: ${{ steps.custom_deploy.outputs.deployment-url }}"
+          echo ">>> [Symulacja deploy] Deployment Time: ${{ steps.custom_deploy.outputs.deployment-time }}"
 
+      - name: Notify on Deployment Failure (tylko symulacja komentarza)
+        if: failure()
+        run: echo ">>> [Symulacja deploy] Wystąpił błąd w symulowanym wdrożeniu – (tylko echo, brak rzeczywistej akcji)."
 
-  # -------------------------------------------------
-  # JOB: notify – powiadomienie o statusie całego pipeline
-  # -------------------------------------------------
-  notify:
-    name: "Powiadomienie o statusie CI/CD"
-    needs:
-      - lint
-      - security-audit
-      - format-check
-      - unit-tests
-      - integration-tests
-      - build
-      - deploy
+  ###################################################
+  # 7. Develop action – tylko na gałęzi develop      #
+  ###################################################
+
+  develop_action:
+    name: Develop action
     runs-on: ubuntu-latest
-    if: ${{ always() }}
+    if: ${{ github.ref == 'refs/heads/develop' }}
     steps:
-      - name: Sprawdź ogólny status
-        id: overall_status
-        run: |
-          STATUS="success"
-          for JOB in lint security-audit format-check unit-tests integration-tests build deploy; do
-            RESULT="${{ needs[$JOB].result }}"
-            if [ "$RESULT" != "success" ]; then
-              STATUS="failure"
-            fi
-          done
-          echo "pipeline_status=$STATUS" >> $GITHUB_OUTPUT
-
-      - name: Wyślij powiadomienie na Slack (jeśli skonfigurowano)
-        if: ${{ env.SLACK_WEBHOOK_URL && steps.overall_status.outputs.pipeline_status == 'success' }}
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ steps.overall_status.outputs.pipeline_status }}
-          fields: repo,message,commit,author,action,event,ref,workflow,job,took
-        env:
-          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
-
-      - name: Komentarz do PR/GitHub Issue (gdy brak Slacka)
-        if: ${{ !env.SLACK_WEBHOOK_URL && steps.overall_status.outputs.pipeline_status == 'failure' && github.event_name == 'pull_request' }}
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const body = `:x: Build zakończył się niepowodzeniem.\nSprawdź logi, aby zobaczyć szczegóły.`;
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
+      - name: Hello on develop
+        run: echo "Hello on develop"
