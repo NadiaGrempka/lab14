@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node app.js",
     "test": "jest --coverage",
-    "format": "prettier --check .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "format:fix": "prettier --write .",
     "lint": "eslint ."
   },
