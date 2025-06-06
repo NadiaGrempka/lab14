@@ -6,6 +6,7 @@
     "start": "node app.js",
     "test": "jest --coverage",
     "format:check": "prettier --check \"src/**/*.js\"",
+    "format:fix": "prettier --write .",
     "lint": "eslint \"src/**/*.js\""
   },
   "keywords": [],
