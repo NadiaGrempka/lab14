@@ -3,12 +3,12 @@ name: "CI/CD Pipeline (Node.js + PostgreSQL + Redis)"
 on:
   push:
     branches:
-      - master
+      - main
       - develop
   pull_request:
     types: [opened, synchronize]
     branches:
-      - master
+      - main
       - develop
   workflow_dispatch:
     inputs:
@@ -367,7 +367,7 @@ jobs:
           path: image.tar
 
   ##############################################
-  # 6. Deployment (symulowany) – tylko na master  #
+  # 6. Deployment (symulowany) – tylko na main  #
   ##############################################
 
   deploy:
@@ -375,7 +375,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
-    if: ${{ github.ref == 'refs/heads/master' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
