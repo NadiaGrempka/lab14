@@ -1,67 +1,78 @@
-name: "Custom Deploy Action"
-description: "Własna akcja kompozytowa do wdrożenia aplikacji"
-author: "Zespół DevOps"
+name: 'Deploy Node Service'
+description: 'Kompozytowa akcja: build ▶ test ▶ simulate deploy ▶ optional notify'
+author: 'DevOps Team'
 
 inputs:
   environment:
-    description: 'Środowisko docelowe (np. staging/prod)'
+    description: 'Docelowe środowisko (staging/production)'
     required: true
     default: 'staging'
   version:
-    description: 'Wersja aplikacji do wdrożenia (np. 1.2.3)'
+    description: 'Commit SHA lub tag wersji do wdrożenia'
     required: true
   notify-team:
-    description: 'Czy powiadomić zespół (true/false)'
+    description: 'Czy wypisać powiadomienie o wdrożeniu? (true/false)'
     required: false
     default: 'false'
   github-token:
-    description: 'Token GitHub do operacji przez API'
+    description: 'Token GitHub do operacji API (zwykle ${{ secrets.GH_TOKEN }})'
     required: true
 
 outputs:
-  deployment-url:
-    description: 'URL, pod którym jest dostępna aplikacja'
-  deployment-time:
+  deployment_url:
+    description: 'Pełny URL, pod którym dostępna jest aplikacja'
+    value: ${{ steps.deploy.outputs.deployment_url }}
+  deployment_time:
     description: 'Czas zakończenia wdrożenia (UTC, ISO8601)'
+    value: ${{ steps.deploy.outputs.deployment_time }}
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Ustaw zmienne wejściowe
-      shell: bash
-      run: |
-        echo "Środowisko: ${{ inputs.environment }}"
-        echo "Wersja: ${{ inputs.version }}"
-        echo "Notify-team: ${{ inputs['notify-team'] }}"
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
 
-    - name: Wykonaj skrypt wdrożenia
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run unit & integration tests
+      run: npm test
+
+    - name: Determine deployment parameters
       id: deploy
       shell: bash
       run: |
-        chmod +x "${{ github.action_path }}/deploy.sh"
-        output="$("${{ github.action_path }}/deploy.sh" \
-          "${{ inputs.environment }}" \
-          "${{ inputs.version }}" \
-          "${{ inputs['notify-team'] }}")"
-        # Załóżmy, że deploy.sh wypisuje JSON: {"url":"...","time":"..."}
-        echo "$output" > result.json
-        echo "::set-output name=deployment-url::$(jq -r .url < result.json)"
-        echo "::set-output name=deployment-time::$(jq -r .time < result.json)"
+        # wybieramy bazowy URL w zależności od środowiska
+        if [ "${{ inputs.environment }}" = "production" ]; then
+          BASE_URL="https://lab14.example.com"
+        else
+          BASE_URL="https://staging.lab14.example.com"
+        fi
 
-    - name: Powiadom GitHub o statusie wdrożenia
+        echo "🚀 Deploying version ${{ inputs.version }} to ${{ inputs.environment }} at $BASE_URL"
+
+        DEPLOY_URL="$BASE_URL/${{ inputs.version }}"
+        echo "deployment_url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        echo "deployment_time=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+    - name: Notify team about deployment
       if: ${{ inputs['notify-team'] == 'true' }}
       uses: actions/github-script@v6
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const url  = "${{ steps.deploy.outputs.deployment-url }}";
-          const time = "${{ steps.deploy.outputs.deployment-time }}";
+          const url  = "${{ steps.deploy.outputs.deployment_url }}";
+          const time = "${{ steps.deploy.outputs.deployment_time }}";
           github.issues.createComment({
             issue_number: context.issue.number || 0,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: `🚀 Aplikacja wdrożona w środowisku **${{ inputs.environment }}**!\n> URL: ${url}\n> Czas: ${time}`
+            body: `🚀 Aplikacja **${{ inputs.version }}** wdrożona w **${{ inputs.environment }}**!\n> URL: ${url}\n> Czas: ${time}`
           });
