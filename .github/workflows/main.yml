@@ -388,7 +388,7 @@ jobs:
 
       - name: Run Custom Deploy Action (symulacja)
         id: custom_deploy
-        uses: ./.github/actions/custom-deploy
+        uses: ./.github/actions
         with:
           environment: ${{ github.event.inputs.environment || 'staging' }}
           version: ${{ github.sha }}
