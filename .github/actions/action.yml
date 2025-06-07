@@ -24,7 +24,7 @@ runs:
       if: ${{ inputs.notify-team == 'true' }}
       uses: actions/github-script@v6
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ secrets.GH_TOKEN }}
         script: ''
       script: |
           const url = "${{ steps.execute.outputs.deployment-url }}";
