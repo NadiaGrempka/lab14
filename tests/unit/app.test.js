@@ -1,5 +1,3 @@
-// tests/unit/app.test.js
-
 const request = require('supertest');
 
 // Przygotowujemy tablice do przechowania instancji mocków
