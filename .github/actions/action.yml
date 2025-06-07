@@ -14,9 +14,9 @@ inputs:
     description: 'Czy wypisać powiadomienie o wdrożeniu? (true/false)'
     required: false
     default: 'false'
-  github-token:
-    description: 'Token GitHub do operacji API (zwykle ${{ secrets.GH_TOKEN }})'
-    required: true
+#  github-token:
+#    description: 'Token GitHub do operacji API (zwykle ${{ secrets.GH_TOKEN }})'
+#    required: true
 
 outputs:
   deployment_url:
@@ -39,9 +39,11 @@ runs:
 
     - name: Install dependencies
       run: npm ci
+      shell: bash
 
     - name: Run unit & integration tests
       run: npm test
+      shell: bash
 
     - name: Determine deployment parameters
       id: deploy
@@ -66,7 +68,7 @@ runs:
       if: ${{ inputs['notify-team'] == 'true' }}
       uses: actions/github-script@v6
       with:
-        github-token: ${{ inputs.github-token }}
+#        github-token: ${{ inputs.github-token }}
         script: |
           const url  = "${{ steps.deploy.outputs.deployment_url }}";
           const time = "${{ steps.deploy.outputs.deployment_time }}";
