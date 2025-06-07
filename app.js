@@ -13,21 +13,22 @@ require('dotenv').config();
 
 const app = express();
 app.use(express.json());
-const adam = "Adam Kowalski";
+
 // Konfiguracja PostgreSQL
 const pgPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+            connectionString:
+            process.env.DATABASE_URL,
     // można dodać dodatkowe opcje, np. ssl
 });
 
 // Konfiguracja Redis
-        const redis = new Redis(process.env.REDIS_URL);
+const redis = new Redis(process.env.REDIS_URL);
 
 // Proste cache’owanie w Redis: klucz → wartość
 // Funkcja pomocnicza do pobrania z cache lub wykonania fallbacku
 async function cacheOrFetch(key, fetchFn, ttlSeconds = 60) {
     const cached = await redis.get(key);
-    if (cached) {
+    if (cached){
         return JSON.parse(cached);
     }
     const result = await fetchFn();
