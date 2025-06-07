@@ -1,40 +1,6 @@
 name: "Custom Deploy Action"
 description: "Własna akcja kompozytowa do wdrożenia aplikacji"
 author: "Zespół DevOps"
-runs:
-  using: "composite"
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Ustaw zmienne wejściowe
-      run: |
-        echo "Środowisko: ${{ inputs.environment }}"
-        echo "Wersja: ${{ inputs.version }}"
-        echo "Notify-team: ${{ inputs.notify-team }}"
-
-    - name: Wykonaj skrypt wdrożenia
-      shell: bash
-      run: |
-        # zakładamy, że deploy.sh jest w katalogu action
-        chmod +x "${{ github.action_path }}/deploy.sh"
-        "${{ github.action_path }}/deploy.sh" "${{ inputs.environment }}" "${{ inputs.version }}" "${{ inputs.notify-team }}"
-
-    - name: Powiadom GitHub o statusie wdrożenia
-      if: ${{ inputs.notify-team == 'true' }}
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GH_TOKEN }}
-        script: ''
-      script: |
-          const url = "${{ steps.execute.outputs.deployment-url }}";
-          const time = "${{ steps.execute.outputs.deployment-time }}";
-          github.issues.createComment({
-            issue_number: context.issue.number || 0,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: `:rocket: Aplikacja została wdrożona w środowisku **${{ inputs.environment }}**!\n> URL: ${url}\n> Czas: ${time}`
-          });
 
 inputs:
   environment:
@@ -48,9 +14,54 @@ inputs:
     description: 'Czy powiadomić zespół (true/false)'
     required: false
     default: 'false'
+  github-token:
+    description: 'Token GitHub do operacji przez API'
+    required: true
 
 outputs:
   deployment-url:
     description: 'URL, pod którym jest dostępna aplikacja'
   deployment-time:
     description: 'Czas zakończenia wdrożenia (UTC, ISO8601)'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Ustaw zmienne wejściowe
+      shell: bash
+      run: |
+        echo "Środowisko: ${{ inputs.environment }}"
+        echo "Wersja: ${{ inputs.version }}"
+        echo "Notify-team: ${{ inputs['notify-team'] }}"
+
+    - name: Wykonaj skrypt wdrożenia
+      id: deploy
+      shell: bash
+      run: |
+        chmod +x "${{ github.action_path }}/deploy.sh"
+        output="$("${{ github.action_path }}/deploy.sh" \
+          "${{ inputs.environment }}" \
+          "${{ inputs.version }}" \
+          "${{ inputs['notify-team'] }}")"
+        # Załóżmy, że deploy.sh wypisuje JSON: {"url":"...","time":"..."}
+        echo "$output" > result.json
+        echo "::set-output name=deployment-url::$(jq -r .url < result.json)"
+        echo "::set-output name=deployment-time::$(jq -r .time < result.json)"
+
+    - name: Powiadom GitHub o statusie wdrożenia
+      if: ${{ inputs['notify-team'] == 'true' }}
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const url  = "${{ steps.deploy.outputs.deployment-url }}";
+          const time = "${{ steps.deploy.outputs.deployment-time }}";
+          github.issues.createComment({
+            issue_number: context.issue.number || 0,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🚀 Aplikacja wdrożona w środowisku **${{ inputs.environment }}**!\n> URL: ${url}\n> Czas: ${time}`
+          });
