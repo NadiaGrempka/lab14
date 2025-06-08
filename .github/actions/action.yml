@@ -14,9 +14,9 @@ inputs:
     description: 'Czy wypisać powiadomienie o wdrożeniu? (true/false)'
     required: false
     default: 'false'
-#  github-token:
-#    description: 'Token GitHub do operacji API (zwykle ${{ secrets.GH_TOKEN }})'
-#    required: true
+  github-token:
+    description: 'Token GitHub do operacji API (zwykle ${{ secrets.GITHUB_TOKEN }})'
+    required: true
 
 outputs:
   deployment_url:
