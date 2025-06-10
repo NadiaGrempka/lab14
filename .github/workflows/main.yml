@@ -31,7 +31,7 @@ jobs:
   ################################################
 
   lint:
-    name: Lint (ESLint)
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -49,7 +49,7 @@ jobs:
         run: npm run lint
 
   audit:
-    name: Security Audit (npm audit)
+    name: Security Audit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -75,7 +75,7 @@ jobs:
         run: npm audit --audit-level=moderate
 
   format:
-    name: Check Formatting (Prettier)
+    name: Change Formatting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -97,7 +97,7 @@ jobs:
   ################################################################
 
   unit_tests:
-    name: Unit Tests (Node.js matrix)
+    name: Unit Tests
     runs-on: ubuntu-latest
     needs:
       - lint
@@ -172,7 +172,7 @@ jobs:
   ###########################################################################
 
   container_tests:
-    name: Tests in Docker Container (Unit only)
+    name: Docker Container (unit tests)
     runs-on: ubuntu-latest
     needs:
       - lint
@@ -191,7 +191,7 @@ jobs:
       - name: Create local npm cache volume directory
         run: mkdir -p ${{ runner.temp }}/npm-cache
 
-      - name: Run unit tests inside Docker (z ograniczeniami zasobów)
+      - name: Run unit tests inside Docker
         run: |
           docker run --rm \
             --cpus=2 --memory=4g \
@@ -222,7 +222,7 @@ jobs:
   ####################################################
 
   integration_tests:
-    name: Integration Tests (PostgreSQL + Redis)
+    name: Integration Tests
     runs-on: ubuntu-latest
     needs:
       - lint
@@ -371,7 +371,7 @@ jobs:
   ##############################################
 
   deploy:
-    name: Deploy (symulowany)
+    name: Deploy - symulacja
     runs-on: ubuntu-latest
     needs:
       - build
