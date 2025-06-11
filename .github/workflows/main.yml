@@ -24,7 +24,6 @@ on:
 env:
   NODE_VERSION: 18
   CACHE_VERSION: "v1"
-  POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
 
 jobs:
   ################################################
@@ -233,15 +232,13 @@ jobs:
       postgres:
         image: postgres:13
         env:
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: secret
           POSTGRES_DB: myappdb
         ports:
           - 5432:5432
         options: >-
-          --env-file ./.env
-          --health-cmd="pg_isready -U $POSTGRES_USER"
-
+          --health-cmd="pg_isready -U ${{ secrets.POSTGRES_USER }}"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
