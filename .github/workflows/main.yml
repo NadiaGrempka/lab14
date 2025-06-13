@@ -143,8 +143,9 @@ jobs:
           push: false
           load: true
           tags: |
-            $IMAGE_NAME:${{ github.sha }}
-            $IMAGE_NAME:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+      
 
       - name: Save Docker image to tar
         run: |
