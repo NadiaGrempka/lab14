@@ -2,8 +2,6 @@ name: "CI/CD Pipeline (Node.js + PostgreSQL + Redis)"
 
 on:
   push:
-    branches:
-      - develop
     branches-ignore:
       - main
   pull_request:
