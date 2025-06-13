@@ -2,8 +2,8 @@ name: "CI/CD Pipeline"
 
 on:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - dev
   pull_request:
     types: [opened, synchronize]
     branches:
@@ -232,7 +232,6 @@ jobs:
     name: Generate Report & Notify
     runs-on: ubuntu-latest
     needs:
-      - lint
       - unit_tests
       - build_image
       - deploy_staging
