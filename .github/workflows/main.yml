@@ -25,10 +25,6 @@ env:
   CACHE_VERSION: "v1"
 
 jobs:
-  ################################################
-  # 1. Faza wstępna (równoległe: lint)
-  ################################################
-
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -46,11 +42,6 @@ jobs:
 
       - name: Run ESLint
         run: npm run lint
-
-
-  ################################################################
-  # 2. Testy jednostkowe w matrixie (różne wersje Node.js + cache)
-  ################################################################
 
   unit_tests:
     name: Unit Testy
@@ -119,11 +110,6 @@ jobs:
           files: coverage/unit/**/*.info
           flags: unit-${{ matrix.node-version }}
 
-
-  ###########################################
-  # 3. Budowanie obrazu produkcyjnego Docker #
-  ###########################################
-
   build_image:
     name: Budowanie i archiwizacja obrazu
     runs-on: ubuntu-latest
@@ -160,9 +146,6 @@ jobs:
             image.tar
             image-latest.tar
 
-  ##################################################
-  # 6. Wdrożenie na STAGING (symulacja) + approval #
-  ##################################################
   deploy_staging:
     name: Wdrożenie na STAGING (symulacja) – czeka na OK
     runs-on: ubuntu-latest
@@ -183,9 +166,6 @@ jobs:
         run: echo ">>> [STAGING] Deployment zakończony (symulacja)."
 
 
-  #########################################################
-  # 8. Deploy to Production (push obrazu do DockerHuba)  #
-  #########################################################
   deploy_production:
     name: Warunkowe wdrożenie na PRODUCTION
     runs-on: ubuntu-latest
@@ -222,10 +202,6 @@ jobs:
       - name: Push image:latest
         run: docker push $IMAGE_NAME:latest
 
-
-  ###############################################################
-  # 9. Raport & powiadomienie – uruchom się zawsze niezależnie od wyniku
-  ###############################################################
   notify_and_report:
     name: Generate Report & Notify
     runs-on: ubuntu-latest
