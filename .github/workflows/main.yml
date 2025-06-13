@@ -140,8 +140,11 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: false    # Tylko budowanie
-          load: true     # Ładujemy do lokalnego demona
+          push: false
+          load: true
+          tags: |
+            $IMAGE_NAME:${{ github.sha }}
+            $IMAGE_NAME:latest
 
       - name: Save Docker image to tar
         run: |
