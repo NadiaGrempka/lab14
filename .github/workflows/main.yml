@@ -53,7 +53,7 @@ jobs:
   ################################################################
 
   unit_tests:
-    name: Unit Tests
+    name: Unit Testy
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -119,239 +119,66 @@ jobs:
           files: coverage/unit/**/*.info
           flags: unit-${{ matrix.node-version }}
 
-  ###########################################################################
-  # 3. Testy uruchamiane we własnym kontenerze Docker (tylko unit-testy)
-  ###########################################################################
-
-  container_tests:
-    name: Docker Container (unit tests)
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - unit_tests
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Build Docker image for tests
-        run: |
-          docker build \
-            --tag ci-node-postgres-redis:${{ github.sha }} \
-            --file Dockerfile .
-
-      - name: Create local npm cache volume directory
-        run: mkdir -p ${{ runner.temp }}/npm-cache
-
-      - name: Run unit tests inside Docker
-        run: |
-          docker run --rm \
-            --cpus=2 --memory=4g \
-            -v ${{ github.workspace }}:/usr/src/app \
-            -v ${{ runner.temp }}/npm-cache:/root/.npm \
-            -w /usr/src/app \
-            ci-node-postgres-redis:${{ github.sha }} \
-            bash -c "npm ci && npm run test:unit"
-
-      - name: Upload Docker-based unit coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-unit-coverage
-          path: coverage/unit
-
-      - name: Publish container-based coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@v3
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        with:
-          files: coverage/unit/**/*.info
-          flags: container-unit
-
-  ####################################################
-  # 4. Testy integracyjne z `services:` (Postgres + Redis)
-  ####################################################
-
-  integration_tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - unit_tests
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: secret
-          POSTGRES_DB: myappdb
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U $POSTGRES_USER"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-      redis:
-        image: redis:6-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v3
-        with:
-          node-version: "${{ env.NODE_VERSION }}"
-
-      - name: Cache npm
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Wait for PostgreSQL
-        run: |
-          for i in {1..30}; do
-            pg_isready -h localhost -U postgres && break
-            echo "Czekam na PostgreSQL..."
-            sleep 1
-          done
-
-      - name: Wait for Redis
-        run: |
-          for i in {1..30}; do
-            redis-cli -h localhost ping | grep PONG && break
-            echo "Czekam na Redis..."
-            sleep 1
-          done
-
-      - name: Set env for integration tests
-        run: |
-          echo "DATABASE_URL=postgres://postgres:secret@localhost:5432/myappdb" >> $GITHUB_ENV
-          echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
-          echo "NODE_ENV=test" >> $GITHUB_ENV
-
-      - name: Run Integration Tests
-        run: npm run test:integration
-
-      - name: Check integration coverage directory
-        run: |
-          echo "### Zawartość folderu coverage/integration ###"
-          ls -R coverage/integration || echo "Brak katalogu coverage/integration"
-
-      - name: Upload integration coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-coverage
-          path: coverage/integration
-          if-no-files-found: ignore
-
-      - name: Publish integration coverage to Codecov
-        if: success()
-        uses: codecov/codecov-action@v3
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        with:
-          files: coverage/integration/**/*.info
-          flags: integration
 
   ###########################################
-  # 5. Budowanie obrazu produkcyjnego Docker #
+  # 3. Budowanie obrazu produkcyjnego Docker #
   ###########################################
 
-  build:
-    name: Build & Publish Docker Image
+  build_image:
+    name: Budowanie i archiwizacja obrazu
     runs-on: ubuntu-latest
-    needs:
-      - integration_tests
-      - unit_tests
-      - container_tests
+    needs: [lint, unit_tests]
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-#      - name: Set up QEMU (dla wieloarchitekturowego builda)
-#        uses: docker/setup-qemu-action@v2
-#
-#      - name: Set up Docker Buildx (opcjonalnie)
-#        uses: docker/setup-buildx-action@v2
+      - name: Set IMAGE_NAME env
+        run: echo "IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/kolos" >> $GITHUB_ENV
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push Docker image
+      - name: Build Docker image (no push)
         uses: docker/build-push-action@v3
         with:
           context: .
           file: Dockerfile
-          push: true
-          load: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/lab14:${{ github.sha }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/lab14:latest
+          push: false    # Tylko budowanie
+          load: true     # Ładujemy do lokalnego demona
 
-      - name: Save Docker image to tar (opcjonalnie)
-        run: docker save ${{ secrets.DOCKERHUB_USERNAME }}/lab14:${{ github.sha }} -o image.tar
+      - name: Save Docker image to tar
+        run: |
+          docker save $IMAGE_NAME:${{ github.sha }} -o image.tar
+          docker save $IMAGE_NAME:latest -o image-latest.tar
 
-      - name: Upload Docker image as artifact
+      - name: Upload image.tar artifacts
         uses: actions/upload-artifact@v4
         with:
           name: docker-image-${{ github.sha }}
-          path: image.tar
+          path: |
+            image.tar
+            image-latest.tar
+
 
   ##############################################
   # 6. Deployment (symulowany) – tylko na main  #
   ##############################################
 
-  deploy:
-    name: Deploy - symulacja
+  deploy_staging:
+    name: Wdrożenie na STAGING (symulacja) i ręczna akceptacja
     runs-on: ubuntu-latest
-    needs:
-      - build
+    needs: build_image
     if: ${{ github.ref == 'refs/heads/main' }}
+    environment:
+      name: staging
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Symulacja pobrania artefaktu obrazu
-        run: echo ">>> [Symulacja deploy] Pobieram artefakt obrazu Docker (tylko echo)."
-
-      - name: Symulacja ładowania obrazu
-        run: echo ">>> [Symulacja deploy] Ładuję obraz Docker (tylko echo)."
-
-      - name: Run Custom Deploy Action (symulacja)
-        id: custom_deploy
-        uses: ./.github/actions
-        with:
-          environment: ${{ github.event.inputs.environment || 'staging' }}
-          version: ${{ github.sha }}
-          notify-team: "true"
-
-      - name: Wyświetl symulowane informacje o wdrożeniu
+      - name: Simulate deployment
         run: |
-          echo ">>> [Symulacja deploy] Deployment URL: ${{ steps.custom_deploy.outputs.deployment-url }}"
-          echo ">>> [Symulacja deploy] Deployment Time: ${{ steps.custom_deploy.outputs.deployment-time }}"
+          echo ">>> [Simulacja] Wdrażam obraz ${{ secrets.DOCKERHUB_USERNAME }}/kolos:${{ github.sha }} na STAGING"
+          echo ">>> [Simulacja] Deployment URL: https://staging.example.com/app/${{ github.sha }}"
 
-      - name: Notify on Deployment Failure (tylko symulacja komentarza)
-        if: failure()
-        run: echo ">>> [Symulacja deploy] Wystąpił błąd w symulowanym wdrożeniu – (tylko echo, brak rzeczywistej akcji)."
+      - name: Verify Simulation
+        run: echo ">>> [Simulacja] Deployment na staging zakończony (symulacja)."
 
   ###################################################
   # 7. Develop action – tylko na gałęzi develop      #
@@ -360,7 +187,90 @@ jobs:
   develop_action:
     name: Develop action
     runs-on: ubuntu-latest
-    if: ${{ github.ref == 'refs/heads/develop' }}
+    if: ${{ github.ref == 'refs/heads/dev' }}
     steps:
       - name: Hello if develop branch
         run: echo "Hello!"
+
+  #########################################################
+  # 8. Deploy to Production (push obrazu do DockerHuba)  #
+  #########################################################
+  deploy_production:
+    name: Warunkowe wdrożenie na PRODUCTION
+    runs-on: ubuntu-latest
+    needs:
+      - deploy_staging
+    if: ${{ github.ref == 'refs/heads/main' }}
+    environment:
+      name: production
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-${{ github.sha }}
+          path: ./images
+
+      - name: Set IMAGE_NAME env
+        run: echo "IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/kolos" >> $GITHUB_ENV
+
+      - name: Load Docker image from tar
+        run: |
+          docker load -i images/image.tar
+          docker load -i images/image-latest.tar
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image:${{ github.sha }}
+        run: docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: Push image:latest
+        run: docker push $IMAGE_NAME:latest
+
+
+  ###############################################################
+  # 9. Raport & powiadomienie – uruchom się zawsze niezależnie od wyniku
+  ###############################################################
+  notify_and_report:
+    name: Generate Report & Notify
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - unit_tests
+      - build_image
+      - deploy_staging
+      - deploy_production
+    if: ${{ always() }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Generate raport.txt
+        run: |
+          {
+            echo "CI/CD Pipeline Report"
+            echo "Repository: ${{ github.repository }}"
+            echo "Workflow run: #${{ github.run_number }} (ID: ${{ github.run_id }})"
+            echo "Commit SHA: ${{ github.sha }}"
+            echo ""
+            echo "Results:"
+            echo "  • Lint:             ${{ needs.lint.result }}"
+            echo "  • Unit Tests:       ${{ needs.unit_tests.result }}"
+            echo "  • Build Image:      ${{ needs.build_image.result }}"
+            echo "  • Deploy Staging:   ${{ needs.deploy_staging.result }}"
+            echo "  • Deploy Production:${{ needs.deploy_production.result }}"
+          } > raport.txt
+
+      - name: Upload raport.txt as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-report-${{ github.run_number }}
+          path: raport.txt
+
+      - name: Notify via placeholder
+        run: echo "Pipeline ${{ github.run_number }} zakończony. Raport dostępny jako artefakt."
+
