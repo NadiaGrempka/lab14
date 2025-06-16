@@ -160,27 +160,29 @@ jobs:
             image.tar
             image-latest.tar
 
-  ##################################################
-  # 6. Wdrożenie na STAGING (symulacja) + approval #
-  ##################################################
+
+  ##############################################
+  # 6. Deployment (symulowany) – tylko na main  #
+  ##############################################
+
   deploy_staging:
-    name: Wdrożenie na STAGING (symulacja) – czeka na OK
+    name: Wdrożenie na STAGING (symulacja) i ręczna akceptacja
     runs-on: ubuntu-latest
     needs: build_image
-    if: ${{ github.ref == 'refs/heads/dev' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     environment:
       name: staging
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Symulacja wdrożenia na STAGING
+      - name: Simulate deployment
         run: |
-          echo ">>> [STAGING] Wdrażam obraz ${{ secrets.DOCKERHUB_USERNAME }}/kolos:${{ github.sha }}"
-          echo ">>> [STAGING] URL: https://staging.example.com/app/${{ github.sha }}"
+          echo ">>> [Simulacja] Wdrażam obraz ${{ secrets.DOCKERHUB_USERNAME }}/kolos:${{ github.sha }} na STAGING"
+          echo ">>> [Simulacja] Deployment URL: https://staging.example.com/app/${{ github.sha }}"
 
-      - name: Weryfikacja symulacji
-        run: echo ">>> [STAGING] Deployment zakończony (symulacja)."
+      - name: Verify Simulation
+        run: echo ">>> [Simulacja] Deployment na staging zakończony (symulacja)."
 
 
   #########################################################
@@ -191,7 +193,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - deploy_staging
-    if: ${{ github.ref == 'refs/heads/dev' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     environment:
       name: production
     steps:
@@ -230,7 +232,6 @@ jobs:
     name: Generate Report & Notify
     runs-on: ubuntu-latest
     needs:
-      - lint
       - unit_tests
       - build_image
       - deploy_staging
