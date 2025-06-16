@@ -167,7 +167,7 @@ jobs:
     name: Wdrożenie na STAGING (symulacja) – czeka na OK
     runs-on: ubuntu-latest
     needs: build_image
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/dev' }}
     environment:
       name: staging
     steps:
@@ -191,7 +191,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - deploy_staging
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/dev' }}
     environment:
       name: production
     steps:
