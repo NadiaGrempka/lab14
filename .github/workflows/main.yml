@@ -1,4 +1,4 @@
-name: "CI/CD Pipeline"
+name: "CI/CD Pipeline (Node.js + PostgreSQL + Redis)"
 
 on:
   push:
@@ -183,6 +183,17 @@ jobs:
       - name: Verify Simulation
         run: echo ">>> [Simulacja] Deployment na staging zakończony (symulacja)."
 
+  ###################################################
+  # 7. Develop action – tylko na gałęzi develop      #
+  ###################################################
+
+  develop_action:
+    name: Develop action
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/dev' }}
+    steps:
+      - name: Hello if develop branch
+        run: echo "Hello!"
 
   #########################################################
   # 8. Deploy to Production (push obrazu do DockerHuba)  #
